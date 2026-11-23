@@ -52,17 +52,16 @@ function evaluateRank(
 export default function LottoChecker() {
   const [activeTab, setActiveTab] = useState<'manual' | 'qr'>('manual');
   const [targetDrawNo, setTargetDrawNo] = useState<string>('');
-  const [drawData, setDrawData] = useState<DrawRecord null |>(null);
+  const [drawData, setDrawData] = useState<DrawRecord | null>(null);
   const [manualInput, setManualInput] = useState<string>('');
   const [qrTextInput, setQrTextInput] = useState<string>('');
   const [results, setResults] = useState<GameResult[]>([]);
   const [statusMsg, setStatusMsg] = useState<string>('');
   const [isScanning, setIsScanning] = useState<boolean>(false);
 
-  const videoRef = useRef<HTMLVideoElement null |>(null);
-  const streamRef = useRef<MediaStream null |>(null);
+  const videoRef = useRef<HTMLVideoElement | null>(null);
+  const streamRef = useRef<MediaStream | null>(null);
 
-  // 초기 로드 시 DB의 최신 회차 가져오기
   useEffect(() => {
     async function loadLatestDraw() {
       const { data } = await supabase
@@ -81,8 +80,7 @@ export default function LottoChecker() {
     return () => stopCamera();
   }, []);
 
-  // 특정 회차 조회
-  async function fetchDrawByNo(no: number): Promise<DrawRecord null |> {
+  async function fetchDrawByNo(no: number): Promise<DrawRecord | null> {
     const { data, error } = await supabase
       .from('lotto_draws')
       .select('*')
@@ -99,7 +97,6 @@ export default function LottoChecker() {
     return data;
   }
 
-  // 수동 번호 대조 실행
   async function handleManualCheck() {
     const parsedNums = manualInput
       .split(/[^0-9]+/)
@@ -132,7 +129,6 @@ export default function LottoChecker() {
     ]);
   }
 
-  // 동행복권 QR URL 파싱 (?v=1251q010512233445q...)
   async function parseAndCheckQrString(raw: string) {
     const match = raw.match(/v=(\d{4})([qmn]\d{12})+/i);
     if (!match) {
@@ -166,7 +162,6 @@ export default function LottoChecker() {
     setStatusMsg(`${drawNo}회차 용지 ${checkedGames.length}게임 대조 완료`);
   }
 
-  // 카메라 QR 스캔 시작
   async function startCamera() {
     setStatusMsg('');
     if (!('BarcodeDetector' in window)) {
@@ -264,7 +259,6 @@ export default function LottoChecker() {
         </div>
       </div>
 
-      {/* 기준 회차 당첨 번호 표시 카드 */}
       {drawData && (
         <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3">
           <div className="flex items-center justify-between text-xs">
@@ -312,7 +306,6 @@ export default function LottoChecker() {
         </div>
       )}
 
-      {/* 탭 1: 수동 번호 입력 대조 */}
       {activeTab === 'manual' && (
         <div className="space-y-3">
           <label className="block text-xs text-slate-300 font-medium">
@@ -337,7 +330,6 @@ export default function LottoChecker() {
         </div>
       )}
 
-      {/* 탭 2: QR 스캔 및 QR 주소 붙여넣기 대조 */}
       {activeTab === 'qr' && (
         <div className="space-y-3">
           <div className="flex gap-2">
@@ -401,7 +393,6 @@ export default function LottoChecker() {
         </p>
       )}
 
-      {/* 대조 결과 리스트 */}
       {results.length > 0 && drawData && (
         <div className="space-y-2 pt-2 border-t border-slate-800">
           {results.map((res, idx) => (
