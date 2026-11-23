@@ -2,6 +2,7 @@
 
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
+import LottoChecker from '@/components/LottoChecker';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -348,6 +349,7 @@ export default function LottoGeneratorPage() {
             </div>
           </section>
         )}
+<LottoChecker/>
 
 {/* 하단 수익화 / 쿠팡 파트너스 제휴 슬롯 */}
         <section className="bg-slate-900/90 border border-amber-500/30 rounded-2xl p-5 space-y-3 shadow-lg">
