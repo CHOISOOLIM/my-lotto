@@ -27,75 +27,61 @@ export async function GET(request: Request) {
       throw fetchError;
     }
 
-    let nextDrawNo = latestRow ? latestRow.draw_no + 1 : 1;
+    const latestInDb = latestRow ? latestRow.draw_no : 0;
     const insertedDraws: number[] = [];
 
-    while (true) {
-      const res = await fetch(
-        `https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${nextDrawNo}`,
-        {
-          cache: 'no-store',
-          headers: {
-            'User-Agent':
-              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
-            Accept: 'application/json, text/javascript, */*; q=0.01',
-            'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
-            Referer: 'https://www.dhlottery.co.kr/gameResult.do?method=byWin',
-            'X-Requested-With': 'XMLHttpRequest',
-          },
-        }
-      );
+    // 1순위: 클라우드 IP 차단이 없는 공개 로또 JSON 미러 조회
+    const mirrorRes = await fetch(
+      'https://smok95.github.io/lotto/results/all.json',
+      { cache: 'no-store' }
+    );
 
-      const rawText = await res.text();
+    if (mirrorRes.ok) {
+      const allDraws: Array<{
+        draw_no: number;
+        date: string;
+        numbers: number[];
+        bonus_no: number;
+      }> = await mirrorRes.json();
 
-      // 동행복권이 HTML(점검 페이지 또는 해외 IP 차단 페이지)을 반환한 경우
-      if (rawText.trim().startsWith('<')) {
-        return NextResponse.json({
-          ok: false,
-          blocked: true,
-          message:
-            '동행복권 서버가 해외 클라우드 IP 접근을 일시 차단했습니다. Vercel 리전을 서울(icn1)로 설정하면 해결됩니다.',
-          latestInDb: latestRow?.draw_no ?? 0,
+      const newDraws = allDraws
+        .filter((d) => d.draw_no > latestInDb)
+        .sort((a, b) => a.draw_no - b.draw_no);
+
+      for (const draw of newDraws) {
+        const sortedNums = [...draw.numbers].sort((a, b) => a - b);
+        const drawDate = draw.date.slice(0, 10);
+
+        const { error: insertError } = await supabase.from('lotto_draws').upsert({
+          draw_no: draw.draw_no,
+          draw_date: drawDate,
+          numbers: sortedNums,
+          bonus_no: draw.bonus_no,
         });
+
+        if (insertError) throw insertError;
+        insertedDraws.push(draw.draw_no);
       }
 
-      const json = JSON.parse(rawText);
-
-      if (json.returnValue !== 'success') {
-        break;
-      }
-
-      const numbers = [
-        json.drwtNo1,
-        json.drwtNo2,
-        json.drwtNo3,
-        json.drwtNo4,
-        json.drwtNo5,
-        json.drwtNo6,
-      ].sort((a, b) => a - b);
-
-      const { error: insertError } = await supabase.from('lotto_draws').upsert({
-        draw_no: json.drwNo,
-        draw_date: json.drwNoDate,
-        numbers,
-        bonus_no: json.bnusNo,
+      return NextResponse.json({
+        ok: true,
+        source: 'mirror',
+        message:
+          insertedDraws.length > 0
+            ? `${insertedDraws.join(', ')}회차 업데이트 완료`
+            : '이미 최신 회차까지 반영되어 있습니다.',
+        latestInDb:
+          insertedDraws.length > 0
+            ? insertedDraws[insertedDraws.length - 1]
+            : latestInDb,
+        updated: insertedDraws,
       });
-
-      if (insertError) throw insertError;
-
-      insertedDraws.push(json.drwNo);
-      nextDrawNo++;
     }
 
-    return NextResponse.json({
-      ok: true,
-      message:
-        insertedDraws.length > 0
-          ? `${insertedDraws.join(', ')}회차 업데이트 완료`
-          : '이미 최신 회차까지 반영되어 있습니다.',
-      latestInDb: nextDrawNo - 1,
-      updated: insertedDraws,
-    });
+    return NextResponse.json(
+      { ok: false, error: '데이터 소스에 연결할 수 없습니다.' },
+      { status: 502 }
+    );
   } catch (err) {
     const message = err instanceof Error ? err.message : '업데이트 중 오류 발생';
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
