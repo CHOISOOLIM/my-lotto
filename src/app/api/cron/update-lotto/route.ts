@@ -33,9 +33,33 @@ export async function GET(request: Request) {
     while (true) {
       const res = await fetch(
         `https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${nextDrawNo}`,
-        { cache: 'no-store' }
+        {
+          cache: 'no-store',
+          headers: {
+            'User-Agent':
+              'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/130.0.0.0 Safari/537.36',
+            Accept: 'application/json, text/javascript, */*; q=0.01',
+            'Accept-Language': 'ko-KR,ko;q=0.9,en-US;q=0.8,en;q=0.7',
+            Referer: 'https://www.dhlottery.co.kr/gameResult.do?method=byWin',
+            'X-Requested-With': 'XMLHttpRequest',
+          },
+        }
       );
-      const json = await res.json();
+
+      const rawText = await res.text();
+
+      // 동행복권이 HTML(점검 페이지 또는 해외 IP 차단 페이지)을 반환한 경우
+      if (rawText.trim().startsWith('<')) {
+        return NextResponse.json({
+          ok: false,
+          blocked: true,
+          message:
+            '동행복권 서버가 해외 클라우드 IP 접근을 일시 차단했습니다. Vercel 리전을 서울(icn1)로 설정하면 해결됩니다.',
+          latestInDb: latestRow?.draw_no ?? 0,
+        });
+      }
+
+      const json = JSON.parse(rawText);
 
       if (json.returnValue !== 'success') {
         break;
@@ -69,6 +93,7 @@ export async function GET(request: Request) {
         insertedDraws.length > 0
           ? `${insertedDraws.join(', ')}회차 업데이트 완료`
           : '이미 최신 회차까지 반영되어 있습니다.',
+      latestInDb: nextDrawNo - 1,
       updated: insertedDraws,
     });
   } catch (err) {
