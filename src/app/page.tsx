@@ -55,6 +55,23 @@ const RANK_CONFIGS: RankConfig[] = [
     strategy: '역대 최다 출현 TOP 10 번호 중 2개 필수 포함'
   }
 ];
+// 제휴 링크 설정 (쿠팡 파트너스 단축 URL로 교체해 사용)
+const AFFILIATE_ITEMS = [
+  {
+    tag: '행운 아이템 추천',
+    title: '순금 도금 황금 두꺼비 & 금전운 부적 카드',
+    desc: '지갑 속에 쏙 들어가는 재물운 부적 · 로또 용지 보관용',
+    url: 'https://link.coupang.com/a/여기에_파트너스_링크_입력',
+    badge: '로또 구매자 인기 1위'
+  },
+  {
+    tag: '당첨 기원 굿즈',
+    title: '고급 가죽 로또 용지 전용 지갑 홀더',
+    desc: '구겨짐 없이 깔끔하게 보관하는 행운의 용지 케이스',
+    url: 'https://link.coupang.com/a/여기에_파트너스_링크_입력',
+    badge: '가성비 추천'
+  }
+];
 
 export default function LottoGeneratorPage() {
   const [selectedRank, setSelectedRank] = useState<TargetRank>(1);
@@ -332,16 +349,39 @@ export default function LottoGeneratorPage() {
           </section>
         )}
 
-        {/* 하단 수익화 / 제휴 마케팅 슬롯 */}
-        <div className="w-full rounded-xl border border-dashed border-slate-700 bg-slate-900/60 p-4 text-center space-y-1">
-          <div className="text-xs font-semibold text-slate-400">
-            [하단 수익화 슬롯 · 쿠팡 파트너스 / 금전운 부적 · 행운 아이템 추천 영역]
+{/* 하단 수익화 / 쿠팡 파트너스 제휴 슬롯 */}
+        <section className="bg-slate-900/90 border border-amber-500/30 rounded-2xl p-5 space-y-3 shadow-lg">
+          <div className="flex items-center justify-between">
+            <span className="text-xs font-bold text-amber-400">
+              🍀 당첨 기원 행운 아이템 큐레이션
+            </span>
+            <span className="text-[10px] text-slate-500">제휴 추천</span>
           </div>
-          <p className="text-[11px] text-slate-500">
-            추출 완료 직후 사용자의 클릭률이 가장 높은 위치입니다.
+
+          <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            {AFFILIATE_ITEMS.map((item, idx) => (
+              <a
+                key={idx}
+                href={item.url}
+                target="_blank"
+                rel="noopener noreferrer sponsored"
+                className="group block bg-slate-950/90 hover:bg-slate-800/90 border border-slate-800 hover:border-amber-400/50 rounded-xl p-3.5 transition-all"
+              >
+                <div className="flex items-center justify-between mb-1">
+                  <span className="text-[10px] font-semibold text-indigo-300">{item.tag}</span>
+                  <span className="text-[10px] px-2 py-0.5 rounded-full bg-amber-500/20 text-amber-300">
+                    {item.badge}
+                  </span>
+                </div>
+                <div className="font-bold text-sm text-white group-hover:text-amber-300 transition-colors">
+                  {item.title}
+                </div>
+                <p className="text-xs text-slate-400 mt-1">{item.desc}</p>
+              </a>
+            ))}
+          </div>
+
+          <p className="text-[10px] text-slate-500 text-center pt-1">
+            이 포스팅은 쿠팡 파트너스 활동의 일환으로, 이에 따른 일정액의 수수료를 제공받습니다.
           </p>
-        </div>
-      </div>
-    </main>
-  );
-}
+        </section>
