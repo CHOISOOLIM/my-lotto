@@ -3,30 +3,27 @@ import Script from 'next/script';
 import './globals.css';
 
 export const metadata: Metadata = {
-  title: 'AI 목표 등수 선택형 로또 번호 분석기',
-  description: '역대 당첨 통계와 목표 등수별 가중치 필터를 적용한 스마트 로또 번호 추출 서비스',
+  title: '목표 등수 선택형 AI 로또 분석기 | 당첨 번호 조회 · QR 대조',
+  description:
+    '역대 당첨 데이터 통계 가중치 기반 목표 등수별 로또 번호 추출기 및 회차별 당첨 번호 조회·QR 코드 대조 서비스',
 };
 
 export default function RootLayout({
   children,
-}: {
+}: Readonly<{
   children: React.ReactNode;
-}) {
-  const adsenseId = process.env.NEXT_PUBLIC_ADSENSE_CLIENT_ID;
-
+}>) {
   return (
     <html lang="ko">
       <head>
-        {adsenseId && (
-          <Script
-            async
-            src={`https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=${adsenseId}`}
-            crossOrigin="anonymous"
-            strategy="afterInteractive"
-          />
-        )}
+        <Script
+          async
+          src="https://pagead2.googlesyndication.com/pagead/js/adsbygoogle.js?client=ca-pub-7260186338959787"
+          crossOrigin="anonymous"
+          strategy="afterInteractive"
+        />
       </head>
-      <body className="bg-slate-950 text-slate-100 antialiased">
+      <body className="bg-[#070b14] text-slate-100 antialiased">
         {children}
       </body>
     </html>
