@@ -28,60 +28,59 @@ export async function GET(request: Request) {
     }
 
     const latestInDb = latestRow ? latestRow.draw_no : 0;
-    const insertedDraws: number[] = [];
 
-    // 1순위: 클라우드 IP 차단이 없는 공개 로또 JSON 미러 조회
     const mirrorRes = await fetch(
       'https://smok95.github.io/lotto/results/all.json',
       { cache: 'no-store' }
     );
 
-    if (mirrorRes.ok) {
-      const allDraws: Array<{
-        draw_no: number;
-        date: string;
-        numbers: number[];
-        bonus_no: number;
-      }> = await mirrorRes.json();
+    if (!mirrorRes.ok) {
+      return NextResponse.json(
+        { ok: false, error: '데이터 소스에 연결할 수 없습니다.' },
+        { status: 502 }
+      );
+    }
 
-      const newDraws = allDraws
-        .filter((d) => d.draw_no > latestInDb)
-        .sort((a, b) => a.draw_no - b.draw_no);
+    const allDraws: Array<{
+      draw_no: number;
+      date: string;
+      numbers: number[];
+      bonus_no: number;
+    }> = await mirrorRes.json();
 
-      for (const draw of newDraws) {
-        const sortedNums = [...draw.numbers].sort((a, b) => a - b);
-        const drawDate = draw.date.slice(0, 10);
+    const newDraws = allDraws
+      .filter((d) => d.draw_no > latestInDb)
+      .sort((a, b) => a.draw_no - b.draw_no);
 
-        const { error: insertError } = await supabase.from('lotto_draws').upsert({
-          draw_no: draw.draw_no,
-          draw_date: drawDate,
-          numbers: sortedNums,
-          bonus_no: draw.bonus_no,
-        });
-
-        if (insertError) throw insertError;
-        insertedDraws.push(draw.draw_no);
-      }
-
+    if (newDraws.length === 0) {
       return NextResponse.json({
         ok: true,
-        source: 'mirror',
-        message:
-          insertedDraws.length > 0
-            ? `${insertedDraws.join(', ')}회차 업데이트 완료`
-            : '이미 최신 회차까지 반영되어 있습니다.',
-        latestInDb:
-          insertedDraws.length > 0
-            ? insertedDraws[insertedDraws.length - 1]
-            : latestInDb,
-        updated: insertedDraws,
+        message: '이미 최신 회차까지 반영되어 있습니다.',
+        latestInDb,
       });
     }
 
-    return NextResponse.json(
-      { ok: false, error: '데이터 소스에 연결할 수 없습니다.' },
-      { status: 502 }
-    );
+    // 1,200여 건을 한 번의 쿼리로 일괄(Bulk) 저장 -> 1초 이내 완료
+    const rowsToUpsert = newDraws.map((draw) => ({
+      draw_no: draw.draw_no,
+      draw_date: draw.date.slice(0, 10),
+      numbers: [...draw.numbers].sort((a, b) => a - b),
+      bonus_no: draw.bonus_no,
+    }));
+
+    const { error: upsertError } = await supabase
+      .from('lotto_draws')
+      .upsert(rowsToUpsert, { onConflict: 'draw_no' });
+
+    if (upsertError) throw upsertError;
+
+    const lastDrawNo = rowsToUpsert[rowsToUpsert.length - 1].draw_no;
+
+    return NextResponse.json({
+      ok: true,
+      message: `총 ${rowsToUpsert.length}개 회차(1회~${lastDrawNo}회) 일괄 업데이트 완료`,
+      latestInDb: lastDrawNo,
+    });
   } catch (err) {
     const message = err instanceof Error ? err.message : '업데이트 중 오류 발생';
     return NextResponse.json({ ok: false, error: message }, { status: 500 });
