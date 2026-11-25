@@ -1,245 +1,247 @@
 'use client';
 
-import React, { useState, useRef, useEffect } from 'react';
-import { createClient } from '@supabase/supabase-js';
+import React, { useState, useEffect, useRef } from 'react';
+import { Html5Qrcode } from 'html5-qrcode';
 
-interface DrawRecord {
-  draw_no: number;
-  draw_date: string;
+interface DrawResult {
+  drawNo: number;
+  drawDate: string;
   numbers: number[];
-  bonus_no: number;
+  bonus: number;
 }
 
-interface GameResult {
-  label: string;
+interface GameCheckResult {
+  gameLabel: string;
   userNumbers: number[];
-  matchedCount: number;
+  matchedNumbers: number[];
   bonusMatched: boolean;
   rank: string;
 }
 
-const supabase = createClient(
-  process.env.NEXT_PUBLIC_SUPABASE_URL!,
-  process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!
-);
+export default function LottoChecker({ initialDraw }: { initialDraw?: DrawResult }) {
+  const [activeTab, setActiveTab] = useState<'draw' | 'qr'>('draw');
+  const [drawNoInput, setDrawNoInput] = useState<string>(
+    initialDraw ? String(initialDraw.drawNo) : ''
+  );
+  const [currentDraw, setCurrentDraw] = useState<DrawResult | null>(initialDraw || null);
+  const [loadingDraw, setLoadingDraw] = useState(false);
 
-function getBallColor(num: number): string {
-  if (num <= 10) return 'bg-amber-400 text-slate-950';
-  if (num <= 20) return 'bg-sky-400 text-slate-950';
-  if (num <= 30) return 'bg-rose-400 text-white';
-  if (num <= 40) return 'bg-slate-400 text-slate-950';
-  return 'bg-emerald-400 text-slate-950';
-}
+  // 수동 번호 대조
+  const [manualInput, setManualInput] = useState('');
+  const [manualResult, setManualResult] = useState<GameCheckResult | null>(null);
 
-function evaluateRank(
-  userNums: number[],
-  winNums: number[],
-  bonusNo: number
-): { matchedCount: number; bonusMatched: boolean; rank: string } {
-  const matchedCount = userNums.filter((n) => winNums.includes(n)).length;
-  const bonusMatched = userNums.includes(bonusNo);
+  // QR 카메라 & URL 파싱 상태
+  const [isScanning, setIsScanning] = useState(false);
+  const [cameraError, setCameraError] = useState<string | null>(null);
+  const [qrUrlInput, setQrUrlInput] = useState('');
+  const [qrDrawNo, setQrDrawNo] = useState<number | null>(null);
+  const [qrResults, setQrResults] = useState<GameCheckResult[]>([]);
+  const scannerRef = useRef<Html5Qrcode | null>(null);
 
-  let rank = '낙첨';
-  if (matchedCount === 6) rank = '🎉 1등 당첨!';
-  else if (matchedCount === 5 && bonusMatched) rank = '🎊 2등 당첨!';
-  else if (matchedCount === 5) rank = '✨ 3등 당첨!';
-  else if (matchedCount === 4) rank = '🍀 4등 (5만원)';
-  else if (matchedCount === 3) rank = '👍 5등 (5천원)';
-
-  return { matchedCount, bonusMatched, rank };
-}
-
-export default function LottoChecker() {
-  const [activeTab, setActiveTab] = useState<'manual' | 'qr'>('manual');
-  const [targetDrawNo, setTargetDrawNo] = useState<string>('');
-  const [drawData, setDrawData] = useState<DrawRecord | null>(null);
-  const [manualInput, setManualInput] = useState<string>('');
-  const [qrTextInput, setQrTextInput] = useState<string>('');
-  const [results, setResults] = useState<GameResult[]>([]);
-  const [statusMsg, setStatusMsg] = useState<string>('');
-  const [isScanning, setIsScanning] = useState<boolean>(false);
-
-  const videoRef = useRef<HTMLVideoElement | null>(null);
-  const streamRef = useRef<MediaStream | null>(null);
-
-  useEffect(() => {
-    async function loadLatestDraw() {
-      const { data } = await supabase
-        .from('lotto_draws')
-        .select('*')
-        .order('draw_no', { ascending: false })
-        .limit(1)
-        .single();
-
-      if (data) {
-        setDrawData(data);
-        setTargetDrawNo(String(data.draw_no));
+  // 회차별 당첨 번호 조회
+  const fetchDrawData = async (targetDrawNo: number): Promise<DrawResult | null> => {
+    try {
+      setLoadingDraw(true);
+      const res = await fetch(`/api/lotto?drwNo=${targetDrawNo}`);
+      if (!res.ok) return null;
+      const data = await res.json();
+      if (data && data.numbers) {
+        return {
+          drawNo: data.drawNo,
+          drawDate: data.drawDate,
+          numbers: data.numbers,
+          bonus: data.bonus,
+        };
       }
-    }
-    loadLatestDraw();
-    return () => stopCamera();
-  }, []);
-
-  async function fetchDrawByNo(no: number): Promise<DrawRecord | null> {
-    const { data, error } = await supabase
-      .from('lotto_draws')
-      .select('*')
-      .eq('draw_no', no)
-      .single();
-
-    if (error || !data) {
-      setStatusMsg(`${no}회차 당첨 데이터를 찾을 수 없습니다.`);
       return null;
+    } catch {
+      return null;
+    } finally {
+      setLoadingDraw(false);
     }
-    setDrawData(data);
-    setTargetDrawNo(String(data.draw_no));
-    setStatusMsg('');
-    return data;
-  }
+  };
 
-  async function handleManualCheck() {
-    const parsedNums = manualInput
-      .split(/[^0-9]+/)
-      .filter(Boolean)
-      .map(Number)
-      .filter((n) => n >= 1 && n <= 45);
+  const handleSearchDraw = async () => {
+    const num = parseInt(drawNoInput, 10);
+    if (!num || num < 1) return;
+    const fetched = await fetchDrawData(num);
+    if (fetched) {
+      setCurrentDraw(fetched);
+      setManualResult(null);
+    } else {
+      alert('해당 회차 데이터를 찾을 수 없습니다.');
+    }
+  };
 
-    const uniqueNums = Array.from(new Set(parsedNums)).slice(0, 6).sort((a, b) => a - b);
+  // 당첨 등수 판정 함수
+  const evaluateGame = (
+    label: string,
+    userNums: number[],
+    winNums: number[],
+    bonusNum: number
+  ): GameCheckResult => {
+    const matched = userNums.filter((n) => winNums.includes(n));
+    const hasBonus = userNums.includes(bonusNum);
+    let rank = '낙첨';
 
-    if (uniqueNums.length !== 6) {
-      setStatusMsg('1~45 사이의 서로 다른 숫자 6개를 입력해 주세요.');
+    if (matched.length === 6) rank = '1등 당첨! 🎉';
+    else if (matched.length === 5 && hasBonus) rank = '2등 당첨! 🎊';
+    else if (matched.length === 5) rank = '3등 당첨! ✨';
+    else if (matched.length === 4) rank = '4등 당첨 (50,000원)';
+    else if (matched.length === 3) rank = '5등 당첨 (5,000원)';
+
+    return {
+      gameLabel: label,
+      userNumbers: [...userNums].sort((a, b) => a - b),
+      matchedNumbers: matched,
+      bonusMatched: hasBonus,
+      rank,
+    };
+  };
+
+  // 수동 6개 번호 대조
+  const handleManualCheck = () => {
+    if (!currentDraw) return;
+    const parsed = manualInput
+      .split(/[\s,]+/)
+      .map((s) => parseInt(s.trim(), 10))
+      .filter((n) => !isNaN(n) && n >= 1 && n <= 45);
+    const unique = Array.from(new Set(parsed));
+    if (unique.length !== 6) {
+      alert('1~45 사이의 중복되지 않는 숫자 6개를 입력해 주세요.');
       return;
     }
+    setManualResult(evaluateGame('내 번호', unique, currentDraw.numbers, currentDraw.bonus));
+  };
 
-    const drawNo = Number(targetDrawNo);
-    const currentDraw =
-      drawData && drawData.draw_no === drawNo
-        ? drawData
-        : await fetchDrawByNo(drawNo);
-
-    if (!currentDraw) return;
-
-    const evalRes = evaluateRank(uniqueNums, currentDraw.numbers, currentDraw.bonus_no);
-    setResults([
-      {
-        label: '입력 번호',
-        userNumbers: uniqueNums,
-        ...evalRes,
-      },
-    ]);
-  }
-
-  async function parseAndCheckQrString(raw: string) {
-    const match = raw.match(/v=(\d{4})([qmn]\d{12})+/i);
+  // 동행복권 QR URL 파싱 (예: http://m.dhlottery.co.kr/?v=1251q010203040506q...)
+  const parseAndCheckQrUrl = async (rawUrl: string) => {
+    const match = rawUrl.match(/v=(\d+)([qm]\d{12})+/i);
     if (!match) {
-      setStatusMsg('올바른 동행복권 QR 코드(또는 URL) 형식이 아닙니다.');
+      setCameraError('동행복권 로또 용지 QR 코드가 아닙니다. 다시 스캔해 주세요.');
       return;
     }
 
-    const drawNo = Number(match[1]);
-    const currentDraw = await fetchDrawByNo(drawNo);
-    if (!currentDraw) return;
+    const vParam = rawUrl.split('v=')[1]?.split('&')[0] || '';
+    const drwNo = parseInt(vParam.slice(0, 4), 10);
+    const gamesPart = vParam.slice(4);
+    const gameMatches = gamesPart.match(/[qm]\d{12}/gi);
 
-    const gameMatches = raw.match(/[qmn](\d{12})/gi) || [];
+    if (!drwNo || !gameMatches || gameMatches.length === 0) {
+      setCameraError('QR 코드에서 게임 번호를 읽지 못했습니다.');
+      return;
+    }
+
+    const targetDraw =
+      currentDraw && currentDraw.drawNo === drwNo ? currentDraw : await fetchDrawData(drwNo);
+
+    if (!targetDraw) {
+      setCameraError(`제 ${drwNo}회 당첨 번호가 아직 추첨 전이거나 조회할 수 없습니다.`);
+      return;
+    }
+
+    setCurrentDraw(targetDraw);
+    setQrDrawNo(drwNo);
+    setCameraError(null);
+
     const labels = ['A', 'B', 'C', 'D', 'E'];
-
-    const checkedGames: GameResult[] = gameMatches.map((block, idx) => {
-      const digits = block.slice(1);
+    const evaluated: GameCheckResult[] = gameMatches.map((chunk, idx) => {
+      const digits = chunk.slice(1);
       const nums: number[] = [];
       for (let i = 0; i < 12; i += 2) {
-        nums.push(Number(digits.slice(i, i + 2)));
+        nums.push(parseInt(digits.slice(i, i + 2), 10));
       }
-      const sorted = nums.sort((a, b) => a - b);
-      const evalRes = evaluateRank(sorted, currentDraw.numbers, currentDraw.bonus_no);
-      return {
-        label: `${labels[idx] || idx + 1}게임`,
-        userNumbers: sorted,
-        ...evalRes,
-      };
+      return evaluateGame(
+        `${labels[idx] || idx + 1}게임`,
+        nums,
+        targetDraw.numbers,
+        targetDraw.bonus
+      );
     });
 
-    setResults(checkedGames);
-    setStatusMsg(`${drawNo}회차 용지 ${checkedGames.length}게임 대조 완료`);
-  }
+    setQrResults(evaluated);
+  };
 
-  async function startCamera() {
-    setStatusMsg('');
-    if (!('BarcodeDetector' in window)) {
-      setStatusMsg(
-        '현재 브라우저는 실시간 카메라 QR 인식을 지원하지 않습니다. 스마트폰 기본 카메라로 QR을 찍어 나온 주소를 아래에 붙여넣어 주세요.'
-      );
-      return;
-    }
+  // 범용 카메라 스캔 시작
+  const startCameraScan = async () => {
+    setCameraError(null);
+    setQrResults([]);
+    setIsScanning(true);
 
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        video: { facingMode: 'environment' },
-      });
-      streamRef.current = stream;
-      setIsScanning(true);
+    setTimeout(async () => {
+      try {
+        const html5QrCode = new Html5Qrcode('lotto-qr-reader');
+        scannerRef.current = html5QrCode;
 
-      if (videoRef.current) {
-        videoRef.current.srcObject = stream;
-        await videoRef.current.play();
-      }
-
-      // @ts-expect-error BarcodeDetector browser API
-      const detector = new window.BarcodeDetector({ formats: ['qr_code'] });
-
-      const scanLoop = async () => {
-        if (!streamRef.current || !videoRef.current) return;
-        try {
-          const barcodes = await detector.detect(videoRef.current);
-          if (barcodes.length > 0 && barcodes[0].rawValue) {
-            const scannedText = barcodes[0].rawValue;
-            setQrTextInput(scannedText);
-            stopCamera();
-            await parseAndCheckQrString(scannedText);
-            return;
+        await html5QrCode.start(
+          { facingMode: 'environment' },
+          { fps: 10, qrbox: { width: 230, height: 230 } },
+          async (decodedText) => {
+            setQrUrlInput(decodedText);
+            await stopCameraScan();
+            await parseAndCheckQrUrl(decodedText);
+          },
+          () => {
+            // 프레임 인식 대기 중 무시
           }
-        } catch {
-          // 프레임 인식 대기
+        );
+      } catch {
+        setIsScanning(false);
+        setCameraError(
+          '카메라를 실행할 수 없습니다. 브라우저 주소창 왼쪽 자물쇠 아이콘에서 카메라 권한을 허용했는지 확인해 주세요.'
+        );
+      }
+    }, 100);
+  };
+
+  // 카메라 중지 및 리소스 해제
+  const stopCameraScan = async () => {
+    if (scannerRef.current) {
+      try {
+        if (scannerRef.current.isScanning) {
+          await scannerRef.current.stop();
         }
-        requestAnimationFrame(scanLoop);
-      };
-
-      requestAnimationFrame(scanLoop);
-    } catch {
-      setStatusMsg('카메라 권한이 거부되었거나 사용할 수 없는 기기입니다.');
-      setIsScanning(false);
-    }
-  }
-
-  function stopCamera() {
-    if (streamRef.current) {
-      streamRef.current.getTracks().forEach((t) => t.stop());
-      streamRef.current = null;
+        scannerRef.current.clear();
+      } catch {
+        // 이미 중지된 경우 무시
+      }
+      scannerRef.current = null;
     }
     setIsScanning(false);
-  }
+  };
+
+  // 탭 전환 또는 언마운트 시 카메라 자동 종료
+  useEffect(() => {
+    if (activeTab !== 'qr') {
+      stopCameraScan();
+    }
+    return () => {
+      stopCameraScan();
+    };
+  }, [activeTab]);
+
+  const getBallColor = (num: number) => {
+    if (num <= 10) return 'bg-amber-400 text-slate-950';
+    if (num <= 20) return 'bg-sky-400 text-slate-950';
+    if (num <= 30) return 'bg-rose-400 text-slate-950';
+    if (num <= 40) return 'bg-slate-300 text-slate-950';
+    return 'bg-emerald-400 text-slate-950';
+  };
 
   return (
-    <section className="bg-slate-900/90 border border-slate-800 rounded-2xl p-5 space-y-5 shadow-xl">
-      <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+    <section className="mt-10 rounded-2xl border border-slate-800 bg-[#0d1424] p-6 shadow-xl">
+      <div className="mb-6 flex flex-col justify-between gap-4 sm:flex-row sm:items-center">
         <div>
-          <h2 className="text-base font-bold text-white">
-            🔍 당첨 번호 조회 & QR / 내 번호 대조
-          </h2>
-          <p className="text-xs text-slate-400">
-            역대 회차 당첨 번호 확인 및 구매 용지 QR 스캔 대조
-          </p>
+          <h2 className="text-lg font-bold text-white">당첨 번호 조회 &amp; QR / 내 번호 대조</h2>
+          <p className="text-xs text-slate-400">역대 회차 당첨 번호 확인 및 구매 용지 QR 스캔 채점</p>
         </div>
-
-        <div className="flex bg-slate-950 p-1 rounded-xl border border-slate-800">
+        <div className="flex rounded-xl bg-slate-900 p-1">
           <button
             type="button"
-            onClick={() => {
-              stopCamera();
-              setActiveTab('manual');
-            }}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
-              activeTab === 'manual'
-                ? 'bg-indigo-600 text-white'
+            onClick={() => setActiveTab('draw')}
+            className={`rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
+              activeTab === 'draw'
+                ? 'bg-indigo-600 text-white shadow'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
@@ -248,9 +250,9 @@ export default function LottoChecker() {
           <button
             type="button"
             onClick={() => setActiveTab('qr')}
-            className={`px-3 py-1.5 text-xs font-semibold rounded-lg transition ${
+            className={`rounded-lg px-3.5 py-2 text-xs font-semibold transition ${
               activeTab === 'qr'
-                ? 'bg-indigo-600 text-white'
+                ? 'bg-indigo-600 text-white shadow'
                 : 'text-slate-400 hover:text-white'
             }`}
           >
@@ -259,184 +261,179 @@ export default function LottoChecker() {
         </div>
       </div>
 
-      {drawData && (
-        <div className="bg-slate-950/90 border border-slate-800 rounded-xl p-4 space-y-3">
-          <div className="flex items-center justify-between text-xs">
-            <span className="font-bold text-indigo-300">
-              제 {drawData.draw_no}회 당첨 번호 ({drawData.draw_date})
-            </span>
-            <div className="flex items-center gap-1.5">
-              <input
-                type="number"
-                value={targetDrawNo}
-                onChange={(e) => setTargetDrawNo(e.target.value)}
-                className="w-20 bg-slate-900 border border-slate-700 rounded-lg px-2 py-1 text-right text-white text-xs"
-                placeholder="회차"
-              />
-              <button
-                type="button"
-                onClick={() => fetchDrawByNo(Number(targetDrawNo))}
-                className="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-200 rounded-lg text-xs font-medium"
-              >
-                조회
-              </button>
-            </div>
-          </div>
-
-          <div className="flex flex-wrap items-center justify-center gap-2 pt-1">
-            {drawData.numbers.map((num) => (
-              <span
-                key={num}
-                className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-extrabold shadow ${getBallColor(
-                  num
-                )}`}
-              >
-                {num}
-              </span>
-            ))}
-            <span className="text-slate-500 text-xs font-bold mx-1">+</span>
-            <span
-              className={`w-8 h-8 rounded-full flex items-center justify-center text-xs font-extrabold ring-2 ring-indigo-400 ${getBallColor(
-                drawData.bonus_no
-              )}`}
-            >
-              {drawData.bonus_no}
-            </span>
-          </div>
-        </div>
-      )}
-
-      {activeTab === 'manual' && (
-        <div className="space-y-3">
-          <label className="block text-xs text-slate-300 font-medium">
-            대조할 6개 번호 입력 (쉼표 또는 띄어쓰기 구분)
-          </label>
-          <div className="flex gap-2">
+      {activeTab === 'draw' ? (
+        <div className="space-y-5">
+          <div className="flex items-center gap-2">
             <input
-              type="text"
-              value={manualInput}
-              onChange={(e) => setManualInput(e.target.value)}
-              placeholder="예: 3, 11, 19, 24, 33, 42"
-              className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3.5 py-2.5 text-sm text-white placeholder-slate-500 focus:outline-none focus:border-indigo-500"
+              type="number"
+              value={drawNoInput}
+              onChange={(e) => setDrawNoInput(e.target.value)}
+              placeholder="회차 입력 (예: 1251)"
+              className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-sm text-white focus:border-indigo-500 focus:outline-none"
             />
             <button
               type="button"
-              onClick={handleManualCheck}
-              className="px-4 py-2.5 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl transition shrink-0"
+              onClick={handleSearchDraw}
+              disabled={loadingDraw}
+              className="shrink-0 rounded-xl bg-slate-800 px-5 py-2.5 text-sm font-semibold text-white hover:bg-slate-700 disabled:opacity-50"
             >
-              당첨 확인
+              {loadingDraw ? '조회 중...' : '조회'}
             </button>
           </div>
-        </div>
-      )}
 
-      {activeTab === 'qr' && (
-        <div className="space-y-3">
-          <div className="flex gap-2">
-            {!isScanning ? (
-              <button
-                type="button"
-                onClick={startCamera}
-                className="w-full py-2.5 bg-emerald-600 hover:bg-emerald-500 text-white text-xs font-bold rounded-xl transition"
-              >
-                📷 카메라로 로또 용지 QR 코드 스캔하기
-              </button>
-            ) : (
-              <button
-                type="button"
-                onClick={stopCamera}
-                className="w-full py-2.5 bg-rose-600 hover:bg-rose-500 text-white text-xs font-bold rounded-xl transition"
-              >
-                스캔 중지
-              </button>
-            )}
-          </div>
-
-          {isScanning && (
-            <div className="relative overflow-hidden rounded-xl border border-emerald-500/50 bg-black aspect-video">
-              <video
-                ref={videoRef}
-                className="w-full h-full object-cover"
-                playsInline
-                muted
-              />
+          {currentDraw && (
+            <div className="rounded-xl border border-slate-800/80 bg-slate-900/70 p-4 text-center">
+              <div className="mb-3 text-xs font-medium text-slate-400">
+                제 <span className="font-bold text-indigo-400">{currentDraw.drawNo}</span>회 당첨 번호 ({currentDraw.drawDate})
+              </div>
+              <div className="flex flex-wrap items-center justify-center gap-2">
+                {currentDraw.numbers.map((n) => (
+                  <span
+                    key={n}
+                    className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-extrabold shadow ${getBallColor(n)}`}
+                  >
+                    {n}
+                  </span>
+                ))}
+                <span className="mx-1 text-slate-500">+</span>
+                <span
+                  className={`flex h-9 w-9 items-center justify-center rounded-full text-sm font-extrabold ring-2 ring-amber-300/60 ${getBallColor(
+                    currentDraw.bonus
+                  )}`}
+                >
+                  {currentDraw.bonus}
+                </span>
+              </div>
             </div>
           )}
 
-          <div className="space-y-1.5">
-            <label className="block text-[11px] text-slate-400">
-              또는 스마트폰 카메라로 QR을 찍어 복사된 주소(URL) 붙여넣기
+          <div className="space-y-2">
+            <label className="block text-xs text-slate-400">
+              대조할 내 번호 6개 입력 (쉼표 또는 띄어쓰기 구분)
             </label>
             <div className="flex gap-2">
               <input
                 type="text"
-                value={qrTextInput}
-                onChange={(e) => setQrTextInput(e.target.value)}
-                placeholder="http://m.dhlottery.co.kr/?v=1251q..."
-                className="flex-1 bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-xs text-white placeholder-slate-500"
+                value={manualInput}
+                onChange={(e) => setManualInput(e.target.value)}
+                placeholder="예: 4, 8, 11, 18, 24, 31"
+                className="w-full rounded-xl border border-slate-700 bg-slate-900 px-4 py-2.5 text-sm text-white focus:border-indigo-500 focus:outline-none"
               />
               <button
                 type="button"
-                onClick={() => parseAndCheckQrString(qrTextInput)}
-                className="px-3.5 py-2 bg-indigo-600 hover:bg-indigo-500 text-white text-xs font-bold rounded-xl shrink-0"
+                onClick={handleManualCheck}
+                className="shrink-0 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white hover:bg-indigo-500"
               >
-                대조
+                당첨 확인
               </button>
             </div>
           </div>
-        </div>
-      )}
 
-      {statusMsg && (
-        <p className="text-xs text-amber-300 bg-amber-500/10 border border-amber-500/30 rounded-lg px-3 py-2">
-          {statusMsg}
-        </p>
-      )}
-
-      {results.length > 0 && drawData && (
-        <div className="space-y-2 pt-2 border-t border-slate-800">
-          {results.map((res, idx) => (
-            <div
-              key={idx}
-              className="flex flex-wrap items-center justify-between gap-2 bg-slate-950 border border-slate-800 rounded-xl p-3"
-            >
-              <div className="flex items-center gap-2">
-                <span className="text-xs font-bold text-slate-400 w-12">
-                  {res.label}
+          {manualResult && (
+            <div className="rounded-xl border border-indigo-500/30 bg-indigo-950/30 p-4">
+              <div className="flex items-center justify-between">
+                <span className="text-sm font-bold text-white">{manualResult.rank}</span>
+                <span className="text-xs text-slate-400">
+                  일치 {manualResult.matchedNumbers.length}개
+                  {manualResult.bonusMatched ? ' + 보너스' : ''}
                 </span>
-                <div className="flex gap-1.5">
-                  {res.userNumbers.map((num) => {
-                    const isWin = drawData.numbers.includes(num);
-                    const isBonus = drawData.bonus_no === num;
-                    return (
-                      <span
-                        key={num}
-                        className={`w-7 h-7 rounded-full flex items-center justify-center text-xs font-bold ${
-                          isWin
-                            ? getBallColor(num)
-                            : isBonus
-                            ? 'bg-indigo-500 text-white ring-2 ring-indigo-300'
-                            : 'bg-slate-800 text-slate-500'
-                        }`}
-                      >
-                        {num}
-                      </span>
-                    );
-                  })}
-                </div>
               </div>
-
-              <span
-                className={`text-xs font-extrabold px-2.5 py-1 rounded-full ${
-                  res.rank === '낙첨'
-                    ? 'bg-slate-800 text-slate-400'
-                    : 'bg-amber-500/20 text-amber-300'
-                }`}
-              >
-                {res.rank}
-              </span>
             </div>
-          ))}
+          )}
+        </div>
+      ) : (
+        <div className="space-y-4">
+          {!isScanning ? (
+            <button
+              type="button"
+              onClick={startCameraScan}
+              className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 py-3.5 text-sm font-bold text-white shadow-lg hover:bg-indigo-500"
+            >
+              📷 카메라 켜고 로또 QR 코드 스캔하기
+            </button>
+          ) : (
+            <div className="space-y-3">
+              <div
+                id="lotto-qr-reader"
+                className="mx-auto overflow-hidden rounded-xl border border-indigo-500/40 bg-black"
+              />
+              <button
+                type="button"
+                onClick={stopCameraScan}
+                className="w-full rounded-xl bg-slate-800 py-2.5 text-xs font-semibold text-slate-300 hover:bg-slate-700"
+              >
+                카메라 닫기
+              </button>
+            </div>
+          )}
+
+          {cameraError && (
+            <div className="rounded-xl border border-amber-500/30 bg-amber-950/30 p-3.5 text-xs leading-relaxed text-amber-200">
+              {cameraError}
+            </div>
+          )}
+
+          <div className="pt-2">
+            <label className="mb-1.5 block text-xs text-slate-400">
+              또는 QR 인식 주소 직접 붙여넣기
+            </label>
+            <div className="flex gap-2">
+              <input
+                type="text"
+                value={qrUrlInput}
+                onChange={(e) => setQrUrlInput(e.target.value)}
+                placeholder="http://m.dhlottery.co.kr/?v=..."
+                className="w-full rounded-xl border border-slate-700 bg-slate-900 px-3.5 py-2 text-xs text-white focus:border-indigo-500 focus:outline-none"
+              />
+              <button
+                type="button"
+                onClick={() => parseAndCheckQrUrl(qrUrlInput)}
+                className="shrink-0 rounded-xl bg-slate-800 px-4 py-2 text-xs font-semibold text-white hover:bg-slate-700"
+              >
+                확인
+              </button>
+            </div>
+          </div>
+
+          {qrResults.length > 0 && (
+            <div className="space-y-2.5 rounded-xl border border-slate-800 bg-slate-900/80 p-4">
+              <div className="text-xs font-bold text-indigo-400">
+                제 {qrDrawNo}회 QR 용지 {qrResults.length}게임 대조 결과
+              </div>
+              {qrResults.map((res, idx) => (
+                <div
+                  key={idx}
+                  className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-950/70 px-3 py-2 text-xs"
+                >
+                  <div className="flex items-center gap-1.5">
+                    <span className="font-bold text-slate-400">{res.gameLabel}</span>
+                    {res.userNumbers.map((n) => {
+                      const isHit = res.matchedNumbers.includes(n);
+                      return (
+                        <span
+                          key={n}
+                          className={`inline-flex h-6 w-6 items-center justify-center rounded-full text-[11px] font-bold ${
+                            isHit
+                              ? 'bg-amber-400 text-slate-950'
+                              : 'bg-slate-800 text-slate-400'
+                          }`}
+                        >
+                          {n}
+                        </span>
+                      );
+                    })}
+                  </div>
+                  <span
+                    className={`font-bold ${
+                      res.rank === '낙첨' ? 'text-slate-500' : 'text-emerald-400'
+                    }`}
+                  >
+                    {res.rank}
+                  </span>
+                </div>
+              ))}
+            </div>
+          )}
         </div>
       )}
     </section>
