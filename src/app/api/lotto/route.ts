@@ -15,23 +15,7 @@ export async function GET(request: Request) {
   );
 
   try {
-    // 1순위: Supabase DB에서 즉시 조회
-    const { data: dbRow } = await supabase
-      .from('lotto_draws')
-      .select('draw_no, draw_date, numbers, bonus_no')
-      .eq('draw_no', drwNo)
-      .single();
-
-    if (dbRow) {
-      return NextResponse.json({
-        drawNo: dbRow.draw_no,
-        drawDate: dbRow.draw_date,
-        numbers: dbRow.numbers,
-        bonus: dbRow.bonus_no,
-      });
-    }
-
-    // 2순위: 동행복권 공식 API 직접 호출
+    // 1순위: 동행복권 공식 API 직접 호출 (가장 정확한 실시간 원본)
     try {
       const dhRes = await fetch(
         `https://www.dhlottery.co.kr/common.do?method=getLottoNumber&drwNo=${drwNo}`,
@@ -54,6 +38,7 @@ export async function GET(request: Request) {
             dhData.drwtNo6,
           ].sort((a, b) => a - b);
 
+          // DB에 잘못된 더미 데이터가 있었다면 실제 데이터로 덮어쓰기(교정)
           await supabase.from('lotto_draws').upsert({
             draw_no: dhData.drwNo,
             draw_date: dhData.drwNoDate,
@@ -70,10 +55,10 @@ export async function GET(request: Request) {
         }
       }
     } catch {
-      // 동행복권 직접 호출 실패 시 3순위로 넘어감
+      // 동행복권 API 차단/지연 시 2순위로 이동
     }
 
-    // 3순위: 공개 미러 JSON 조회 후 DB에 자동 저장
+    // 2순위: 검증된 공개 미러 JSON 조회 및 DB 교정
     const mirrorRes = await fetch('https://smok95.github.io/lotto/results/all.json', {
       cache: 'no-store',
     });
@@ -105,6 +90,22 @@ export async function GET(request: Request) {
           bonus: found.bonus_no,
         });
       }
+    }
+
+    // 3순위: 외부 통신 실패 시 최후의 수단으로 DB 조회
+    const { data: dbRow } = await supabase
+      .from('lotto_draws')
+      .select('draw_no, draw_date, numbers, bonus_no')
+      .eq('draw_no', drwNo)
+      .single();
+
+    if (dbRow) {
+      return NextResponse.json({
+        drawNo: dbRow.draw_no,
+        drawDate: dbRow.draw_date,
+        numbers: dbRow.numbers,
+        bonus: dbRow.bonus_no,
+      });
     }
 
     return NextResponse.json({ error: '해당 회차 데이터를 찾을 수 없습니다.' }, { status: 404 });
