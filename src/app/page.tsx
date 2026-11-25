@@ -3,6 +3,7 @@
 import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import LottoChecker from '@/components/LottoChecker';
+import WinningStoresFinder from '@/components/WinningStoresFinder';
 
 const supabase = createClient(
   process.env.NEXT_PUBLIC_SUPABASE_URL!,
@@ -372,6 +373,9 @@ export default function Home() {
 
         {/* 2. 회차별 당첨 번호 조회 & QR / 내 번호 대조기 */}
         <LottoChecker />
+
+        {/* 3. 1·2등 당첨 판매점 조회 */}
+      <WinningStoresFinder latestDrawNo={latestDraw?.draw_no} />
 
         {/* 3. 하단 수익화 / 쿠팡 파트너스 개발자 후원 슬롯 */}
         <section className="bg-slate-900/90 border border-amber-500/30 rounded-2xl p-5 space-y-3 shadow-lg">
