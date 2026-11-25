@@ -1,6 +1,6 @@
 'use client';
 
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { createClient } from '@supabase/supabase-js';
 import LottoChecker from '@/components/LottoChecker';
 
@@ -18,6 +18,13 @@ interface RankConfig {
   subtitle: string;
   detail: string;
   filterNote: string;
+}
+
+interface LatestDraw {
+  draw_no: number;
+  draw_date: string;
+  numbers: number[];
+  bonus_no: number;
 }
 
 const RANK_CONFIGS: Record<TargetRank, RankConfig> = {
@@ -95,8 +102,25 @@ export default function Home() {
   const [generatedGames, setGeneratedGames] = useState<number[][]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(false);
   const [copiedIdx, setCopiedIdx] = useState<number | null>(null);
+  const [latestDraw, setLatestDraw] = useState<LatestDraw | null>(null);
 
   const currentConfig = RANK_CONFIGS[selectedRank];
+
+  useEffect(() => {
+    async function fetchLatestDraw() {
+      const { data } = await supabase
+        .from('lotto_draws')
+        .select('draw_no, draw_date, numbers, bonus_no')
+        .order('draw_no', { ascending: false })
+        .limit(1)
+        .single();
+
+      if (data) {
+        setLatestDraw(data as LatestDraw);
+      }
+    }
+    fetchLatestDraw();
+  }, []);
 
   async function handleGenerate() {
     setIsLoading(true);
@@ -185,7 +209,9 @@ export default function Home() {
         {/* 상단 헤더 */}
         <header className="text-center space-y-2.5">
           <div className="inline-block px-3.5 py-1 rounded-full bg-indigo-950/90 border border-indigo-500/30 text-indigo-300 text-xs font-semibold">
-            역대 1,000회차 당첨 데이터 실시간 분석 엔진
+            {latestDraw
+              ? `역대 1~${latestDraw.draw_no}회차 당첨 데이터 실시간 분석 엔진`
+              : '역대 당첨 데이터 실시간 분석 엔진'}
           </div>
           <h1 className="text-2xl sm:text-3xl font-extrabold tracking-tight text-amber-400">
             목표 등수 선택형 AI 로또 분석기
@@ -194,6 +220,49 @@ export default function Home() {
             원하는 목표 등수를 선택하면 해당 구간 당첨 통계 가중치를 적용해 번호를 추출합니다.
           </p>
         </header>
+
+        {/* 직전 주(최신 회차) 1등 당첨번호 배너 */}
+        {latestDraw && (
+          <section className="bg-gradient-to-r from-slate-900 via-indigo-950/40 to-slate-900 border border-amber-400/30 rounded-2xl p-4 sm:p-5 shadow-lg">
+            <div className="flex flex-col sm:flex-row sm:items-center sm:justify-between gap-3">
+              <div className="space-y-0.5 text-center sm:text-left">
+                <div className="inline-flex items-center gap-1.5">
+                  <span className="px-2 py-0.5 rounded-md bg-amber-400/15 text-amber-300 text-[11px] font-bold">
+                    직전 회차 1등 당첨번호
+                  </span>
+                  <span className="text-[11px] text-slate-400">
+                    {latestDraw.draw_date} 추첨
+                  </span>
+                </div>
+                <div className="text-base sm:text-lg font-extrabold text-white">
+                  제 <span className="text-amber-400">{latestDraw.draw_no}회</span> 당첨결과
+                </div>
+              </div>
+
+              <div className="flex items-center justify-center gap-1.5 sm:gap-2">
+                {latestDraw.numbers.map((num) => (
+                  <span
+                    key={num}
+                    className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-extrabold shadow-md ${getBallColor(
+                      num
+                    )}`}
+                  >
+                    {num}
+                  </span>
+                ))}
+                <span className="text-slate-400 font-bold text-sm px-0.5">+</span>
+                <span
+                  title="보너스 번호"
+                  className={`w-8 h-8 sm:w-9 sm:h-9 rounded-full flex items-center justify-center text-xs sm:text-sm font-extrabold shadow-md ring-2 ring-amber-400/60 ${getBallColor(
+                    latestDraw.bonus_no
+                  )}`}
+                >
+                  {latestDraw.bonus_no}
+                </span>
+              </div>
+            </div>
+          </section>
+        )}
 
         {/* 상단 광고 배너 영역 */}
         <div className="w-full border border-dashed border-slate-700/80 bg-slate-900/40 rounded-xl py-3 px-4 text-center">
